@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+schema_version: 1
+
+context:
+  version: "0.15.2"
+  styles: share/vale/styles
+
+package:
+  name: vale-styles-microsoft
+  version: ${{ version }}
+
+source:
+  url: https://github.com/errata-ai/Microsoft/releases/download/v${{ version }}/Microsoft.zip
+  sha256: c696d462128a4440b66d0ca1e8f2de38660209a3134d1ba7ea55ac1a75b7a2b6
+  target_directory: Microsoft
+
+build:
+  number: 0
+  noarch: generic
+  script:
+    - mkdir -p "${PREFIX}/${{ styles }}"
+    - echo "Packages = './Microsoft'" > .vale.ini
+    - vale sync
+    - vale ls-config
+    - vale ls-dirs
+
+requirements:
+  host:
+    - vale
+  run:
+    - vale
+
+tests:
+  - package_contents:
+      strict: true
+      files:
+        - ${{ styles }}/Microsoft
+  - requirements:
+      run:
+        - pytest
+    script:
+      file: run_test.py
+
+about:
+  license: MIT
+  license_file: Microsoft/LICENSE
+  summary: Microsoft rules for vale grammar and style checker
+  homepage: https://github.com/errata-ai/Microsoft
+
+extra:
+  recipe-maintainers:
+    - bollwyvl
