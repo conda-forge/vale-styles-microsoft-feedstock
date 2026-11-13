@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import json
 import os
 import sys
 from pathlib import Path
-from subprocess import Popen, PIPE, call
+from subprocess import CompletedProcess, call, run
 from textwrap import indent
-from typing import Generator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 os.environ.update(
     PYTHONIOENCODING="utf-8",
@@ -13,15 +18,16 @@ os.environ.update(
 
 from pytest import fixture
 
-UTF8 = dict(encoding="utf-8")
-VALE_NAME = "Microsoft"
-
+# env
+VALE_NAME = os.environ["VALE_PKG_NAME"]
 VALE_PATH = Path(sys.prefix) / "share/vale/styles"
-VALE_CONF_PATH = VALE_PATH / ".vale-config"
-VALE_INI = ".vale.ini"
-PYTEST_ARGS = ["-svv", "--color=yes", __file__]
 
-DEFAULT_INI = """
+# constants
+PYTEST_ARGS = ["-svv", "--color=yes"]
+VALE_INI = ".vale.ini"
+
+# fixtures
+NO_RULES_INI = """
 MinAlertLevel = suggestion
 
 [*]
@@ -36,68 +42,66 @@ Packages = {name}
 BasedOnStyles = {name}
 """
 
-DEFAULT_MD_WITH_AN_ISSUE = """
+MD_WITH_AN_ISSUE = """
 # hello world
 """
 
-MD_WITH_AN_ISSUE = {}
-
-MD_WITH_AN_ISSUE["Joblint"] = """
-# crush it bro
+# output
+EXPECT_JSON = """
+  {
+    "README.md": [
+      {
+        "Action": {
+          "Name": "",
+          "Params": null
+        },
+        "Suggestions": [],
+        "Span": [
+          3,
+          13
+        ],
+        "Check": "Microsoft.Headings",
+        "Description": "",
+        "Link": "https://learn.microsoft.com/en-us/style-guide/capitalization",
+        "Message": "'hello world' should use sentence-style capitalization.",
+        "Severity": "suggestion",
+        "Match": "hello world",
+        "Line": 2
+      }
+    ]
+  }
 """
 
-MD_WITH_AN_ISSUE["write-good"] = """
-a chip off the old block
-"""
 
-MD_WITH_AN_ISSUE["Readability"] = (
-    " ".join(["Buffalo", *[["chicken", "buffalo"][i % 2] for i in range(200)]]) + "."
-)
-
-MD_WITH_AN_ISSUE["alex"] = """
-ancient man
-"""
-
-MD_WITH_AN_ISSUE["proselint"] = """
-taking off momentarily
-"""
-
-def test_vale_path():
-    rc, stdout, stderr = _run_vale_json("ls-dirs")
-    assert str(VALE_PATH) in stdout, f"`{VALE_PATH}` was not found"
+def test_vale_path() -> None:
+    res = _run_vale_json("ls-dirs")
+    assert str(VALE_PATH) in res.stdout, f"`{VALE_PATH}` was not found"
 
 
-def test_style_in_vale_path(a_markdown_file_with_issue: Path):
+def test_style_in_vale_path(a_markdown_file_with_issue: Path) -> None:
     ini = a_markdown_file_with_issue.parent / VALE_INI
     name = ini.parent.name
     style_dir = VALE_PATH / name
     assert style_dir.is_dir(), f"`{name}` is not in {VALE_PATH}"
 
 
-def test_style_finds_or_fixes_issue(a_markdown_file_with_issue: Path):
+def test_style_finds_or_fixes_issue(a_markdown_file_with_issue: Path) -> None:
     ini = a_markdown_file_with_issue.parent / VALE_INI
     name = ini.parent.name
 
-    rc, stdout, stderr = _run_vale_json(a_markdown_file_with_issue.name)
+    has_issues = _run_vale_json(a_markdown_file_with_issue.name)
+    assert not has_issues.stderr, f"`{name}` didn't expect any stderr"
+    assert json.loads(has_issues.stdout) == json.loads(EXPECT_JSON)
 
-    assert not stderr, f"`{name}` didn't expect any stderr"
+    ini.write_text(NO_RULES_INI, encoding="utf-8")
 
-    issues = json.loads(stdout)
-
-    assert issues
-
-    ini.write_text(DEFAULT_INI, **UTF8)
-
-    rc2, stdout2, stderr2 = _run_vale_json(a_markdown_file_with_issue.name)
-    issues2 = json.loads(stdout2)
-
-    assert not stderr2, f"didn't expect any stderr without `{name}`"
-
-    assert not issues2
+    no_issues = _run_vale_json(a_markdown_file_with_issue.name)
+    assert not no_issues.stderr, f"didn't expect any stderr without `{name}`"
+    assert not json.loads(no_issues.stdout)
 
 
 @fixture
-def in_a_project(tmp_path: Path) -> Generator[Path, None, None]:
+def in_a_project(tmp_path: Path) -> Iterator[Path]:
     project = tmp_path / VALE_NAME
     project.mkdir()
     old_cwd = Path.cwd()
@@ -110,33 +114,31 @@ def in_a_project(tmp_path: Path) -> Generator[Path, None, None]:
 def a_vale_ini(in_a_project: Path) -> Path:
     name = in_a_project.name
     ini = in_a_project / VALE_INI
-    ini.write_text(INI_TEMPLATE.format(name=name), **UTF8)
+    ini.write_text(INI_TEMPLATE.format(name=name), encoding="utf-8")
     print(name, "config")
-    print(indent(ini.read_text(**UTF8), "\t"))
+    print(indent(ini.read_text(encoding="utf-8"), "\t"))
     return ini
 
 
 @fixture
 def a_markdown_file_with_issue(a_vale_ini: Path) -> Path:
     project = a_vale_ini.parent
-    name = project.name
     readme = project / "README.md"
-    readme.write_text(MD_WITH_AN_ISSUE.get(name, DEFAULT_MD_WITH_AN_ISSUE), **UTF8)
+    readme.write_text(MD_WITH_AN_ISSUE, encoding="utf-8")
     return readme
 
 
-def _run_vale_json(*args: str):
-    args = ["vale", "--output=JSON", *args]
-    print(">>>", *args)
-    proc = Popen(args, stdout=PIPE, stderr=PIPE, **UTF8)
-    stdout, stderr = proc.communicate()
-    print("... rc", proc.returncode)
+def _run_vale_json(*args: str) -> CompletedProcess[str]:
+    args = ("vale", "--output=JSON", *args)
+    print("\n>>>", *args)
+    res = run(args, capture_output=True, check=False, encoding="utf-8")
+    print("... rc", res.returncode)
     print("... stdout")
-    print(indent(stdout, "\t"))
+    print(indent(res.stdout, "\t"))
     print("... stderr")
-    print(indent(stderr, "\t"))
-    return proc.returncode, stdout, stderr
+    print(indent(res.stderr, "\t"), "\n")
+    return res
 
 
 if __name__ == "__main__":
-    sys.exit(call([sys.executable, "-m", "pytest", *PYTEST_ARGS, __file__], **UTF8))
+    sys.exit(call([sys.executable, "-m", "pytest", *PYTEST_ARGS, __file__]))

@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/prefix-dev/recipe-format/main/schema.json
+schema_version: 1
+
+context:
+  version: "0.15.2"
+  vale_name: Microsoft
+  summary: Microsoft rules for vale grammar and style checker
+  # well-known
+  styles: share/vale/styles
+  # os
+  export: ${{ "export" if unix else "set "}}
+  mkdir_p: ${{ "mkdir -p" if unix else "md" }}
+  slash: ${{ "/" if unix else "\\" }}
+  cp_r: ${{ "cp -r" if unix else "copy" }}
+  os_styles: ${{ slash }}${{ styles | split("/") | join(slash) }}${{ slash }}
+
+package:
+  name: vale-styles-microsoft
+  version: ${{ version }}
+
+source:
+  url: https://github.com/errata-ai/${{ vale_name }}/releases/download/v${{ version }}/${{ vale_name }}.zip
+  sha256: c696d462128a4440b66d0ca1e8f2de38660209a3134d1ba7ea55ac1a75b7a2b6
+  target_directory: ${{ vale_name }}
+
+build:
+  number: 0
+  noarch: generic
+  script:
+    - ${{ mkdir_p }} "${{ PREFIX }}${{ os_styles }}}"
+    - ${{ cp_r }} "${{ vale_name }}" "${{ PREFIX }}${{ os_styles }}${{ slash }}${{ vale_name }}"
+
+requirements:
+  run:
+    - vale
+
+tests:
+  - package_contents:
+      strict: true
+      files:
+        - ${{ styles }}/${{ vale_name }}/*.yml
+        - ${{ styles }}/${{ vale_name }}/LICENSE
+        - ${{ styles }}/${{ vale_name }}/meta.json
+  - requirements:
+      run:
+        - pytest
+    script:
+      env:
+        VALE_PKG_NAME: ${{ vale_name }}
+      file: run_test.py
+
+about:
+  license: MIT
+  license_file: ${{ vale_name }}/LICENSE
+  summary: ${{ summary }}
+  homepage: https://github.com/errata-ai/${{ vale_name }}
+
+extra:
+  recipe-maintainers:
+    - bollwyvl
